@@ -30,8 +30,9 @@ After the first successful refresh, add the `Water consumption` sensor to the Ho
 ## Energy Dashboard Setup
 
 1. Go to *Settings → Dashboards → Energy*.
-2. Under **Water consumption**, pick the newly created `Water consumption` sensor.
-3. Optionally add the `Daily water usage` sensor to standard HA statistics or charts.
+2. Under **Water consumption**, pick the cumulative `Water consumption` sensor (state class `total_increasing`).
+3. If you want a cost track, enable **Use a static price** and enter the current Tallinna Vesi tariff for private customers in Tallinn/Saue (as of 1 May 2025 this is €2.10/m³ before VAT; with 20 % VAT it comes to €2.52/m³—double-check against your invoice).
+4. Optionally surface the `Daily water usage` sensor in regular statistics cards or charts for short-term insights.
 
 ## Troubleshooting
 
