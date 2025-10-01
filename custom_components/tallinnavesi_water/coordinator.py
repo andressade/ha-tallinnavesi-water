@@ -120,10 +120,7 @@ def _calculate_daily_consumption(
     for reading in reversed(readings):
         if reading.reading_date <= start_of_day_utc:
             prior_total = _pick_total_value(reading)
-            if (
-                prior_total is not None
-                and reading.reading_date != readings[-1].reading_date
-            ):
+            if prior_total is not None:
                 break
 
     if prior_total is None:
