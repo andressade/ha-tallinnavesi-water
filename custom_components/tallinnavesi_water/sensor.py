@@ -104,6 +104,7 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
     _attr_translation_key = "daily_water_usage"
     _attr_unique_id_suffix = SENSOR_KEY_DAILY
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = None
 
     @property
     def unique_id(self) -> str | None:
