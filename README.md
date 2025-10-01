@@ -43,7 +43,7 @@ After the first successful refresh, add the `Water consumption` sensor to the Ho
 
 ## Development
 
-- The integration polls hourly; adjust `DEFAULT_UPDATE_INTERVAL` in `const.py` for testing.
+- The integration polls every 10 minutes; adjust `DEFAULT_UPDATE_INTERVAL` in `const.py` for testing.
 - Unit tests live under `tests/` and use pytest with Home Assistant test fixtures.
 
 ## Disclaimer

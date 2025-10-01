@@ -8,7 +8,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "tallinnavesi_water"
 PLATFORMS: list[Platform] = [Platform.SENSOR]
-DEFAULT_UPDATE_INTERVAL = timedelta(hours=1)
+DEFAULT_UPDATE_INTERVAL = timedelta(minutes=10)
 CONF_SUPPLY_POINT_ID = "supply_point_id"
 CONF_METER_NUMBER = "meter_number"
 CONF_ADDRESS = "address"
