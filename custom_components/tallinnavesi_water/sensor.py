@@ -125,5 +125,5 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
         return data.daily_consumption if data else None
 
     @property
-    def suggested_unit_of_measurement(self) -> str | None:
+    def native_unit_of_measurement(self) -> str | None:
         return UnitOfVolume.CUBIC_METERS
