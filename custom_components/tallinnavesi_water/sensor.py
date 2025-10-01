@@ -107,6 +107,12 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
     _attr_device_class = None
 
     @property
+    def device_class(self) -> SensorDeviceClass | None:
+        """Daily usage is a consumptive delta, so omit device class."""
+
+        return None
+
+    @property
     def unique_id(self) -> str | None:
         base = self._supply_point_id or self._meter_number
         if base is None:
