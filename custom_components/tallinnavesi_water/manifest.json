@@ -1,0 +1,12 @@
+{
+  "domain": "tallinnavesi_water",
+  "name": "Tallinna Vesi Water",
+  "config_flow": true,
+  "documentation": "https://github.com/andres/tallinnavesi_water",
+  "issue_tracker": "https://github.com/andres/tallinnavesi_water/issues",
+  "iot_class": "cloud_polling",
+  "integration_type": "hub",
+  "requirements": [],
+  "codeowners": ["@andres"],
+  "version": "0.1.0"
+}

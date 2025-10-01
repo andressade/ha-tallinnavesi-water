@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Tallinna Vesi",
+        "description": "Enter your Tallinna Vesi API key to fetch smart meter data.",
+        "data": {
+          "api_key": "API key"
+        }
+      },
+      "select_meter": {
+        "title": "Select smart meter",
+        "description": "Choose which smart meter to monitor.",
+        "data": {
+          "meter_number": "Smart meter"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "no_smart_meter": "No smart meters are linked to this account.",
+      "no_supply_points": "No smart meters are linked to this account.",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_water_consumption": {
+        "name": "Water consumption"
+      },
+      "daily_water_usage": {
+        "name": "Daily water usage"
+      }
+    }
+  }
+}
