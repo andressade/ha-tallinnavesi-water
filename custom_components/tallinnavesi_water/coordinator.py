@@ -113,20 +113,28 @@ def _calculate_daily_consumption(
         return None
 
     local_latest = dt_util.as_local(latest_timestamp)
-    current_date = local_latest.date()
+    start_of_day_local = dt_util.start_of_local_day(local_latest)
+    start_of_day_utc = dt_util.as_utc(start_of_day_local)
 
-    daily_totals: list[float] = []
-    for reading in readings:
-        reading_total = _pick_total_value(reading)
-        if reading_total is None:
-            continue
-        if dt_util.as_local(reading.reading_date).date() == current_date:
-            daily_totals.append(reading_total)
+    baseline_total: float | None = None
+    for reading in reversed(readings):
+        if reading.reading_date <= start_of_day_utc:
+            baseline_total = _pick_total_value(reading)
+            if baseline_total is not None:
+                break
 
-    if not daily_totals:
+    if baseline_total is None:
+        current_date = local_latest.date()
+        for reading in readings:
+            if dt_util.as_local(reading.reading_date).date() != current_date:
+                continue
+            baseline_total = _pick_total_value(reading)
+            if baseline_total is not None:
+                break
+
+    if baseline_total is None:
         return None
 
-    baseline_total = daily_totals[0]
     consumption = latest_total - baseline_total
     if consumption < 0:
         _LOGGER.debug(

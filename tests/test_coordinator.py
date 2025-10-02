@@ -68,3 +68,23 @@ def test_calculate_daily_consumption_handles_missing_prior_total() -> None:
     latest_timestamp = readings[-1].reading_date
 
     assert _calculate_daily_consumption(readings, latest_timestamp) is None
+
+
+def test_calculate_daily_consumption_falls_back_to_same_day_baseline() -> None:
+    midnight = _BASE_TIME.replace(hour=0)
+    readings = [
+        SmartMeterReading(
+            reading=None,
+            reading_end=200.0,
+            reading_date=midnight + timedelta(hours=8),
+        ),
+        SmartMeterReading(
+            reading=None,
+            reading_end=200.25,
+            reading_date=midnight + timedelta(hours=20),
+        ),
+    ]
+
+    result = _calculate_daily_consumption(readings, readings[-1].reading_date)
+
+    assert result == 0.25
