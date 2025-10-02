@@ -105,6 +105,7 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
     _attr_unique_id_suffix = SENSOR_KEY_DAILY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_device_class = None
+    _attr_icon = "mdi:water-check"
 
     @property
     def unique_id(self) -> str | None:
@@ -116,4 +117,6 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
     @property
     def native_value(self) -> float | None:
         data: ConsumptionData | None = self.coordinator.data
-        return data.daily_consumption if data else None
+        if not data or data.daily_consumption is None:
+            return None
+        return round(data.daily_consumption, 3)

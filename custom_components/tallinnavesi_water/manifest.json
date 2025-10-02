@@ -8,5 +8,5 @@
   "integration_type": "hub",
   "requirements": [],
   "codeowners": ["@andres"],
-  "version": "0.1.4"
+  "version": "0.1.5"
 }
