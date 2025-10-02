@@ -107,6 +107,13 @@ class TallinnVesiDailySensor(TallinnVesiBaseSensor):
     _attr_device_class = None
 
     @property
+    def unique_id(self) -> str | None:
+        base = self._supply_point_id or self._meter_number
+        if base is None:
+            return None
+        return f"{base}_{self._attr_unique_id_suffix}"
+
+    @property
     def native_value(self) -> float | None:
         data: ConsumptionData | None = self.coordinator.data
         return data.daily_consumption if data else None
