@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, List, Mapping, Optional
@@ -13,12 +14,15 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     API_BASE_URL,
+    LEGACY_API_BASE_URL,
     READINGS_OVERVIEW_ENDPOINT,
     SMART_METER_READINGS_ENDPOINT,
+    SMART_METER_READINGS_PAGE_SIZE,
     SMART_METER_SUPPLY_POINTS_ENDPOINT,
 )
 
 DEFAULT_TIMEOUT: Final = ClientTimeout(total=30)
+_LOGGER = logging.getLogger(__name__)
 
 
 class TallinnVesiApiError(Exception):
@@ -75,6 +79,7 @@ class TallinnVesiApiClient:
     def __init__(self, session: ClientSession, api_key: str) -> None:
         self._session = session
         self._api_key = api_key
+        self._base_url = API_BASE_URL
 
     @classmethod
     def for_hass(cls, hass: HomeAssistant, api_key: str) -> "TallinnVesiApiClient":
@@ -126,7 +131,12 @@ class TallinnVesiApiClient:
     ) -> SmartMeterReadingsResult:
         """Fetch smart meter readings from optional start date."""
 
-        params: dict[str, Any] = {"meterNr": meter_number}
+        params: dict[str, Any] = {
+            "meterNr": meter_number,
+            "to": self._format_datetime(dt_util.utcnow()),
+            "pageNo": 1,
+            "pageSize": SMART_METER_READINGS_PAGE_SIZE,
+        }
         if from_datetime is not None:
             params["from"] = self._format_datetime(from_datetime)
 
@@ -163,26 +173,52 @@ class TallinnVesiApiClient:
     ) -> Any:
         """Execute an HTTP request to the Tallinna Vesi API."""
 
-        url = f"{API_BASE_URL}{endpoint}"
-        headers = {"X-API-Key": self._api_key}
+        base_urls = [self._base_url]
+        if self._base_url == API_BASE_URL:
+            base_urls.append(LEGACY_API_BASE_URL)
 
-        try:
-            async with self._session.request(
-                method,
-                url,
-                headers=headers,
-                params=params,
-                timeout=DEFAULT_TIMEOUT,
-            ) as response:
-                if response.status in (401, 403):
-                    raise TallinnVesiAuthError("Authentication failed")
-                if response.status >= 400:
-                    raise TallinnVesiApiError(
-                        f"API request failed with status {response.status}"
-                    )
-                return await response.json()
-        except ClientError as err:
-            raise TallinnVesiApiError("Error communicating with Tallinna Vesi API") from err
+        auth_error: TallinnVesiAuthError | None = None
+        client_error: TallinnVesiApiError | None = None
+        for base_url in base_urls:
+            url = f"{base_url}{endpoint}"
+            headers = {"X-API-Key": self._api_key}
+
+            try:
+                async with self._session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=DEFAULT_TIMEOUT,
+                ) as response:
+                    if response.status in (401, 403):
+                        auth_error = TallinnVesiAuthError("Authentication failed")
+                        continue
+                    if response.status >= 400:
+                        raise TallinnVesiApiError(
+                            f"API request failed with status {response.status}"
+                        )
+                    payload = await response.json()
+            except ClientError as err:
+                client_error = TallinnVesiApiError(
+                    "Error communicating with Tallinna Vesi API"
+                )
+                if base_url == base_urls[-1]:
+                    raise client_error from err
+                continue
+
+            if base_url != self._base_url:
+                _LOGGER.warning(
+                    "Tallinn Vesi new API rejected the configured key; falling back to legacy endpoint"
+                )
+                self._base_url = base_url
+            return payload
+
+        if auth_error is not None:
+            raise auth_error
+        if client_error is not None:
+            raise client_error
+        raise TallinnVesiApiError("Error communicating with Tallinna Vesi API")
 
     @staticmethod
     def _format_datetime(value: datetime) -> str:

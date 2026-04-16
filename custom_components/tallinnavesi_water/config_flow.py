@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,6 +13,7 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .api import (
     ReadingOverview,
+    SupplyPoint,
     TallinnVesiApiClient,
     TallinnVesiApiError,
     TallinnVesiAuthError,
@@ -24,6 +26,8 @@ from .const import (
     DOMAIN,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Tallinn Vesi water."""
@@ -32,7 +36,6 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     _api_key: str | None = None
     _supply_points: list[dict[str, Any]] | None = None
-    _overview_by_meter: dict[str, ReadingOverview] | None = None
 
     async def async_step_user(
         self, user_input: Mapping[str, Any] | None = None
@@ -41,7 +44,8 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         schema = vol.Schema({vol.Required(CONF_API_KEY): str})
-        smart_overview: list[ReadingOverview] = []
+        supply_points: list[SupplyPoint] = []
+        overview_by_meter: dict[str, ReadingOverview] = {}
 
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=schema)
@@ -50,29 +54,26 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         client = TallinnVesiApiClient.for_hass(self.hass, api_key)
 
         try:
-            overview = await client.async_get_overview_readings()
+            supply_points = await client.async_get_supply_points()
         except TallinnVesiAuthError:
             errors["base"] = "invalid_auth"
         except TallinnVesiApiError:
             errors["base"] = "cannot_connect"
         else:
-            smart_overview = [
-                item
-                for item in overview
-                if (item.meter_type or "").lower() == "smart"
-            ]
-            if not smart_overview:
-                errors["base"] = "no_smart_meter"
+            self._supply_points = _build_supply_point_selections(supply_points)
+            if not self._supply_points:
+                errors["base"] = "no_supply_points"
 
-        supply_points: list[Any] | None = None
         if not errors:
             try:
-                supply_points = await client.async_get_supply_points()
-            except TallinnVesiApiError:
-                errors["base"] = "cannot_connect"
+                overview = await client.async_get_overview_readings()
+            except TallinnVesiApiError as err:
+                _LOGGER.debug("Failed to fetch readings overview during setup: %s", err)
             else:
-                if not supply_points:
-                    errors["base"] = "no_supply_points"
+                overview_by_meter = _build_overview_by_meter(overview, supply_points)
+                self._supply_points = _build_supply_point_selections(
+                    supply_points, overview_by_meter
+                )
 
         if errors:
             return self.async_show_form(
@@ -82,33 +83,7 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         self._api_key = api_key
-        overview_map = {
-            item.meter_number: item for item in smart_overview if item.meter_number
-        }
-        self._overview_by_meter = overview_map or None
-
-        supply_points = supply_points or []
-
-        if overview_map:
-            self._supply_points = [
-                {
-                    CONF_SUPPLY_POINT_ID: sp.supply_point_id,
-                    CONF_METER_NUMBER: sp.meter_number,
-                    CONF_ADDRESS: sp.address
-                    or overview_map[sp.meter_number].address,
-                }
-                for sp in supply_points
-                if sp.meter_number in overview_map
-            ]
-        else:
-            self._supply_points = [
-                {
-                    CONF_SUPPLY_POINT_ID: sp.supply_point_id,
-                    CONF_METER_NUMBER: sp.meter_number,
-                    CONF_ADDRESS: sp.address,
-                }
-                for sp in supply_points
-            ]
+        assert self._supply_points is not None
 
         if len(self._supply_points) == 1:
             return await self._async_create_entry(self._supply_points[0])
@@ -171,3 +146,44 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if address and meter_nr:
             return f"{address} ({meter_nr})"
         return address or meter_nr or "Smart meter"
+
+
+def _build_overview_by_meter(
+    overview: list[ReadingOverview], supply_points: list[SupplyPoint]
+) -> dict[str, ReadingOverview]:
+    """Keep only overview entries that match smart-meter supply points."""
+
+    meter_numbers = {item.meter_number for item in supply_points if item.meter_number}
+    return {
+        item.meter_number: item
+        for item in overview
+        if item.meter_number and item.meter_number in meter_numbers
+    }
+
+
+def _build_supply_point_selections(
+    supply_points: list[SupplyPoint],
+    overview_by_meter: Mapping[str, ReadingOverview] | None = None,
+) -> list[dict[str, str]]:
+    """Build selectable smart-meter entries for the config flow."""
+
+    selections: list[dict[str, str]] = []
+    for supply_point in supply_points:
+        if not supply_point.meter_number:
+            continue
+
+        overview = (
+            overview_by_meter.get(supply_point.meter_number)
+            if overview_by_meter is not None
+            else None
+        )
+        address = supply_point.address or (overview.address if overview else None)
+
+        selection = {CONF_METER_NUMBER: supply_point.meter_number}
+        if supply_point.supply_point_id:
+            selection[CONF_SUPPLY_POINT_ID] = supply_point.supply_point_id
+        if address:
+            selection[CONF_ADDRESS] = address
+        selections.append(selection)
+
+    return selections

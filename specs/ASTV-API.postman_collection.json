@@ -1,0 +1,277 @@
+{
+	"info": {
+		"_postman_id": "astv-api-collection",
+		"name": "ASTV Self-Service Portal API",
+		"description": "REST API for AS Tallinna Vesi self-service portal.\n\nEndpoints are exposed via Salesforce Apex REST (`/services/apexrest/`) and secured with API key authentication plus IP whitelisting.\n\n## Authentication\nAll requests (except OAuth) require the `X-API-Key` header with a valid, non-expired API key. The caller's IP must be whitelisted.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{ "key": "key", "value": "X-API-Key", "type": "string" },
+			{ "key": "value", "value": "{{api_key}}", "type": "string" },
+			{ "key": "in", "value": "header", "type": "string" }
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://astv2.my.site.com/services/apexrest",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Readings",
+			"description": "Meter readings — retrieve latest values and submit new readings",
+			"item": [
+				{
+					"name": "Get latest meter readings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/Readings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "Readings"]
+						},
+						"description": "Returns the most recent reading for every active water meter associated with the authenticated account."
+					},
+					"response": [
+						{
+							"name": "200 — Success",
+							"originalRequest": {
+								"method": "GET",
+								"url": { "raw": "{{base_url}}/api/Readings", "host": ["{{base_url}}"], "path": ["api", "Readings"] }
+							},
+							"status": "OK",
+							"code": 200,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "{\n  \"results\": [\n    {\n      \"address\": \"Pärnu mnt 10, Tallinn\",\n      \"meterNr\": \"07179527\",\n      \"lastReading\": 1234.56,\n      \"meterCodeName\": \"Cold Water\",\n      \"lastReadingDate\": \"2026-04-01T08:30:00.000Z\",\n      \"meterType\": \"Mechanical\"\n    }\n  ]\n}"
+						},
+						{
+							"name": "401 — Missing API key",
+							"originalRequest": {
+								"method": "GET",
+								"url": { "raw": "{{base_url}}/api/Readings", "host": ["{{base_url}}"], "path": ["api", "Readings"] }
+							},
+							"status": "Unauthorized",
+							"code": 401,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "{\n  \"status\": \"error\",\n  \"message\": \"Missing X-API-Key header.\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Submit meter readings",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"readings\": [\n    {\n      \"meterNumber\": \"07179527\",\n      \"newReading\": 1250.00,\n      \"submitWithWarnings\": false\n    },\n    {\n      \"meterNumber\": \"05995862\",\n      \"newReading\": 890.12,\n      \"submitWithWarnings\": false\n    }\n  ]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/api/Readings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "Readings"]
+						},
+						"description": "Submits one or more meter readings. All readings are validated before any are persisted — if one fails validation the entire batch is rejected unless `submitWithWarnings` is set to `true`."
+					},
+					"response": [
+						{
+							"name": "200 — Success",
+							"originalRequest": {
+								"method": "POST",
+								"url": { "raw": "{{base_url}}/api/Readings", "host": ["{{base_url}}"], "path": ["api", "Readings"] }
+							},
+							"status": "OK",
+							"code": 200,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "{\n  \"results\": [\n    {\n      \"meterNumber\": \"07179527\",\n      \"status\": \"Success\",\n      \"message\": \"Reading submitted successfully\"\n    },\n    {\n      \"meterNumber\": \"05995862\",\n      \"status\": \"Failed\",\n      \"message\": \"New reading value is required\"\n    }\n  ]\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Smart Meter",
+			"description": "Smart meter data — historical readings and supply point discovery",
+			"item": [
+				{
+					"name": "Get smart meter readings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/SmartMeter/GetSmartMeterReadings?meterNr=07179527&from=2026-01-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z&pageNo=1&pageSize=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "SmartMeter", "GetSmartMeterReadings"],
+							"query": [
+								{ "key": "meterNr", "value": "07179527", "description": "Meter number (required)" },
+								{ "key": "from", "value": "2026-01-01T00:00:00.000Z", "description": "Start date/time (ISO 8601)" },
+								{ "key": "to", "value": "2026-04-01T00:00:00.000Z", "description": "End date/time (ISO 8601)" },
+								{ "key": "contractNumber", "value": "", "description": "Contract number filter", "disabled": true },
+								{ "key": "consumptionPointNumber", "value": "", "description": "Consumption point number filter", "disabled": true },
+								{ "key": "pageNo", "value": "1", "description": "Page number (1-based)" },
+								{ "key": "pageSize", "value": "50", "description": "Results per page" },
+								{ "key": "orderBy", "value": "", "description": "SOQL order clause", "disabled": true }
+							]
+						},
+						"description": "Retrieves historical smart meter readings for a specific meter. Supports pagination and date-range filtering."
+					},
+					"response": [
+						{
+							"name": "200 — Success",
+							"originalRequest": {
+								"method": "GET",
+								"url": { "raw": "{{base_url}}/api/SmartMeter/GetSmartMeterReadings?meterNr=07179527", "host": ["{{base_url}}"], "path": ["api", "SmartMeter", "GetSmartMeterReadings"] }
+							},
+							"status": "OK",
+							"code": 200,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "{\n  \"readings\": [\n    {\n      \"reading\": 1200.00,\n      \"readingEnd\": 1205.50,\n      \"readingDate\": \"2026-03-15T06:00:00.000Z\"\n    },\n    {\n      \"reading\": 1205.50,\n      \"readingEnd\": 1211.30,\n      \"readingDate\": \"2026-03-16T06:00:00.000Z\"\n    }\n  ],\n  \"supplyPointId\": \"KP-001234\",\n  \"meterNr\": \"07179527\",\n  \"errors\": []\n}"
+						}
+					]
+				},
+				{
+					"name": "Get supply points with smart meters",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/SmartMeter/GetSupplyPointsWithSmartMeter",
+							"host": ["{{base_url}}"],
+							"path": ["api", "SmartMeter", "GetSupplyPointsWithSmartMeter"]
+						},
+						"description": "Returns all supply points that have an active smart meter installed, scoped to the authenticated account."
+					},
+					"response": [
+						{
+							"name": "200 — Success",
+							"originalRequest": {
+								"method": "GET",
+								"url": { "raw": "{{base_url}}/api/SmartMeter/GetSupplyPointsWithSmartMeter", "host": ["{{base_url}}"], "path": ["api", "SmartMeter", "GetSupplyPointsWithSmartMeter"] }
+							},
+							"status": "OK",
+							"code": 200,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "[\n  {\n    \"meterNr\": \"07179527\",\n    \"supplyPointId\": \"KP-001234\",\n    \"objectId\": \"a0sVe000003wZOfIAM\",\n    \"address\": \"Tedre tn 73, Tallinn\"\n  },\n  {\n    \"meterNr\": \"05995862\",\n    \"supplyPointId\": \"KP-005678\",\n    \"objectId\": \"a0sVe000003wZQHIA2\",\n    \"address\": \"Pärnu mnt 10, Tallinn\"\n  }\n]"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Service Break",
+			"description": "Service interruption notifications (internal integration)",
+			"item": [
+				{
+					"name": "Upsert service break",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"serviceBreakId\": 42,\n  \"serviceBreakName\": \"Planned maintenance — Pärnu mnt\",\n  \"serviceBreakClass\": \"Planned\",\n  \"status\": \"Active\",\n  \"type\": \"Water\",\n  \"serviceBreakDetails\": [\n    {\n      \"serviceBreakId\": 42,\n      \"consumerPointCode\": \"KP-001234\",\n      \"plannedStartTime\": \"2026-04-20T08:00:00.000Z\",\n      \"plannedEndTime\": \"2026-04-20T18:00:00.000Z\",\n      \"actualStartTime\": null,\n      \"actualEndTime\": null\n    }\n  ]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/service-break/",
+							"host": ["{{base_url}}"],
+							"path": ["service-break", ""]
+						},
+						"description": "Creates or updates a service interruption record. Publishes a `Claim_sync__e` platform event on success.\n\n**Note:** This endpoint is for internal system integration only."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "OAuth",
+			"description": "Authentication endpoints for SSO login flow",
+			"item": [
+				{
+					"name": "Exchange code for token",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Basic {{client_credentials}}", "description": "Client credentials (Base64 encoded client_id:client_secret)" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/token?code=AUTH_CODE_HERE",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "token"],
+							"query": [
+								{ "key": "code", "value": "AUTH_CODE_HERE", "description": "Authorization code from identity provider" }
+							]
+						},
+						"description": "Exchanges an authorization code for an access token. Used by the SSO login flow (Smart-ID / Mobile-ID / ID-card)."
+					},
+					"response": [
+						{
+							"name": "200 — Token issued",
+							"originalRequest": {
+								"method": "POST",
+								"url": { "raw": "{{base_url}}/auth/token?code=abc123", "host": ["{{base_url}}"], "path": ["auth", "token"] }
+							},
+							"status": "OK",
+							"code": 200,
+							"header": [{ "key": "Content-Type", "value": "application/json" }],
+							"body": "{\n  \"access_token\": \"eyJhbGci...\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 3600\n}"
+						}
+					]
+				},
+				{
+					"name": "Get user info",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [
+							{ "key": "X-Authorization", "value": "{{session_token}}", "description": "Session token from login" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/userinfo",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "userinfo"]
+						},
+						"description": "Returns user profile information for the authenticated session."
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [""]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Auto-check response status",
+					"pm.test('Status code is 200', function () {",
+					"    pm.response.to.have.status(200);",
+					"});"
+				]
+			}
+		}
+	]
+}
