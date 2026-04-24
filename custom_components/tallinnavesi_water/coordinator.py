@@ -125,7 +125,7 @@ def _calculate_daily_consumption(
 
     if baseline_total is None:
         current_date = local_latest.date()
-        for reading in readings:
+        for reading in readings[:-1]:
             if dt_util.as_local(reading.reading_date).date() != current_date:
                 continue
             baseline_total = _pick_total_value(reading)

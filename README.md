@@ -1,13 +1,15 @@
 # Tallinna Vesi Water Integration (HACS)
 
-Custom Home Assistant integration for monitoring cumulative and daily water consumption from Tallinna Vesi smart meters via their public self-service API.
+Custom Home Assistant integration for monitoring cumulative and daily water consumption from Tallinna Vesi smart meters via their updated self-service API.
 
 ## Features
 
 - Secure authentication with Tallinna Vesi `X-API-Key`
+- Compatible with the ASTV Apex REST API migration (`astv2.my.site.com/services/apexrest`)
+- Automatically falls back to the legacy API if Tallinna Vesi has not activated your migrated ASTV key yet
 - Automatic discovery of the account's smart meter supply point
 - Validates that your account exposes at least one smart meter before completing setup
-- Hourly polling of smart meter readings
+- 10-minute polling of smart meter readings
 - Exposes two sensors:
   - `Water consumption` (`total_increasing`, m³) – feeds Home Assistant's Energy / Water dashboard
   - `Daily water usage` (`measurement`, m³) – delta from midnight to the latest reading
@@ -17,13 +19,14 @@ Custom Home Assistant integration for monitoring cumulative and daily water cons
 
 - Home Assistant 2024.6 or newer (tested with 2024.8), running with HACS
 - Valid Tallinna Vesi self-service API key that has at least one smart meter linked
+- If Tallinna Vesi enabled IP allow-listing for your key, your Home Assistant outbound IP must be whitelisted too
 
 ## Installation (HACS)
 
 1. Copy or clone this repository into your Home Assistant `custom_components` directory.
 2. Restart Home Assistant.
 3. In *Settings → Devices & Services*, click **Add Integration** and look for "Tallinna Vesi Water".
-4. Enter your Tallinna Vesi API key when prompted. If the account has multiple smart meters, choose the one you want to monitor.
+4. Enter your existing Tallinna Vesi API key when prompted. If the account has multiple smart meters, choose the one you want to monitor.
 
 After the first successful refresh, add the `Water consumption` sensor to the Home Assistant Energy dashboard under the Water section.
 
@@ -36,7 +39,9 @@ After the first successful refresh, add the `Water consumption` sensor to the Ho
 
 ## Troubleshooting
 
-- **Invalid API key**: verify the key from the Tallinna Vesi self-service portal (generated from the "reading submission" page).
+- **Invalid API key**: verify the key from the Tallinna Vesi self-service portal. Existing keys continue to work after the API migration.
+- **Connection or access errors after the migration**: confirm Tallinna Vesi has whitelisted the outbound IP address used by your Home Assistant instance for the new ASTV API.
+- **New ASTV API rejects the key but the old API still works**: the integration falls back automatically to the legacy endpoint and keeps polling until Tallinna Vesi completes the migration on their side.
 - **No smart meters found**: ensure your account shows a smart meter at the Tallinna Vesi self-service page.
 - Check diagnostics (Device → Diagnostics) to view recent API responses and timestamps.
 - Logs use the namespace `custom_components.tallinnavesi_water`.
