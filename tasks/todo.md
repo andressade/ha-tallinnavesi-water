@@ -9,4 +9,4 @@
 
 - `python3 -m compileall custom_components tests` passed
 - `uv run --python 3.12 --with pytest --with pytest-asyncio --with homeassistant==2024.8.3 --with josepy==1.15.0 python -m pytest -q` passed (`16 passed`)
-- live smoke on 2026-04-24: ASTV returned `200` for overview and supply points; `GetSmartMeterReadings` returned readings when called without `from/to` filters
+- live smoke with `TV_API_KEY`: ASTV returned `401 Invalid X-API-Key token`, legacy API returned `200` for overview, supply points, and smart-meter readings
