@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, call
 
@@ -10,6 +12,7 @@ from aiohttp import ClientError
 
 from custom_components.tallinnavesi_water.api import (
     TallinnVesiApiClient,
+    TallinnVesiApiError,
     TallinnVesiAuthError,
 )
 from custom_components.tallinnavesi_water.const import (
@@ -243,9 +246,10 @@ async def test_async_get_overview_readings_parses_smart_meter_entries() -> None:
 
 
 class _MockResponse:
-    def __init__(self, status: int, payload: object) -> None:
+    def __init__(self, status: int, payload: object, text: str = "") -> None:
         self.status = status
         self._payload = payload
+        self._text = text
 
     async def __aenter__(self) -> "_MockResponse":
         return self
@@ -253,8 +257,11 @@ class _MockResponse:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
 
-    async def json(self) -> object:
+    async def json(self, *args: object, **kwargs: object) -> object:
         return self._payload
+
+    async def text(self) -> str:
+        return self._text
 
 
 class _MockSession:
@@ -292,7 +299,9 @@ async def test_request_falls_back_to_legacy_base_url_on_new_api_auth_failure() -
 
 
 @pytest.mark.asyncio
-async def test_request_raises_auth_error_when_all_base_urls_fail() -> None:
+async def test_request_raises_auth_error_when_all_base_urls_fail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
     client._api_key = "secret"  # type: ignore[attr-defined]
     client._base_url = API_BASE_URL  # type: ignore[attr-defined]
@@ -302,8 +311,76 @@ async def test_request_raises_auth_error_when_all_base_urls_fail() -> None:
 
     client._session = _MockSession(request)  # type: ignore[attr-defined]
 
+    caplog.set_level(logging.WARNING)
+
     with pytest.raises(TallinnVesiAuthError, match="Authentication failed"):
         await TallinnVesiApiClient._request(client, "get", "/api/Readings")
+    assert "astv2.my.site.com" in caplog.text
+    assert "klient.tallinnavesi.ee" in caplog.text
+    assert "authentication status 401" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_includes_response_error_detail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = LEGACY_API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        return _MockResponse(
+            500,
+            {"message": "Internal server error", "status": "error"},
+        )
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(
+        TallinnVesiApiError,
+        match="API request failed with status 500: Internal server error",
+    ):
+        await TallinnVesiApiClient._request(
+            client, "get", "/api/SmartMeter/GetSmartMeterReadings"
+        )
+    assert "klient.tallinnavesi.ee" in caplog.text
+    assert "API request failed with status 500: Internal server error" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_redacts_sensitive_response_error_detail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = LEGACY_API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        return _MockResponse(
+            500,
+            {
+                "message": (
+                    "Rejected X-API-Key: live-secret-value and "
+                    "Authorization Bearer live-token-value"
+                )
+            },
+        )
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(TallinnVesiApiError) as err:
+        await TallinnVesiApiClient._request(client, "get", "/api/Readings")
+
+    assert "live-secret-value" not in str(err.value)
+    assert "live-token-value" not in str(err.value)
+    assert "live-secret-value" not in caplog.text
+    assert "live-token-value" not in caplog.text
+    assert "X-API-Key: <redacted>" in caplog.text
+    assert "Authorization Bearer <redacted>" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -329,3 +406,57 @@ async def test_request_falls_back_to_legacy_base_url_on_network_error() -> None:
         f"{API_BASE_URL}/api/Readings",
         f"{LEGACY_API_BASE_URL}/api/Readings",
     ]
+
+
+@pytest.mark.asyncio
+async def test_request_reports_network_error_host_and_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = LEGACY_API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        raise ClientError("boom")
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(
+        TallinnVesiApiError,
+        match=(
+            "Error communicating with Tallinna Vesi API at "
+            "klient.tallinnavesi.ee: ClientError: boom"
+        ),
+    ):
+        await TallinnVesiApiClient._request(client, "get", "/api/Readings")
+    assert "klient.tallinnavesi.ee" in caplog.text
+    assert "ClientError: boom" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_reports_timeout_error_host_and_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = LEGACY_API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        raise asyncio.TimeoutError
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(
+        TallinnVesiApiError,
+        match=(
+            "Error communicating with Tallinna Vesi API at "
+            "klient.tallinnavesi.ee: TimeoutError"
+        ),
+    ):
+        await TallinnVesiApiClient._request(client, "get", "/api/Readings")
+    assert "klient.tallinnavesi.ee" in caplog.text
+    assert "TimeoutError" in caplog.text

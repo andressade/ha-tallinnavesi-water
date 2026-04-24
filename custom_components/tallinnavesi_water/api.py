@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, List, Mapping, Optional
+from urllib.parse import urlparse
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from homeassistant.core import HomeAssistant
@@ -24,6 +27,25 @@ from .const import (
 DEFAULT_TIMEOUT: Final = ClientTimeout(total=30)
 MAX_SMART_METER_READING_PAGES: Final = 10
 SMART_METER_READINGS_ORDER_BY: Final = "ReadingDate DESC"
+SENSITIVE_ERROR_PATTERNS: Final = (
+    (
+        re.compile(
+            r"(?i)(authorization)(\s+)(bearer|basic)(\s+)([^\s\"',;]+)"
+        ),
+        r"\1\2\3\4<redacted>",
+    ),
+    (
+        re.compile(r"(?i)(bearer)(\s+)([^\s\"',;]+)"),
+        r"\1\2<redacted>",
+    ),
+    (
+        re.compile(
+            r"(?i)(x-api-key|api[_ -]?key|token|secret)"
+            r"([\"'\s:=]+)([^\s\"',;]+)"
+        ),
+        r"\1\2<redacted>",
+    ),
+)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -241,16 +263,39 @@ class TallinnVesiApiClient:
                     timeout=DEFAULT_TIMEOUT,
                 ) as response:
                     if response.status in (401, 403):
+                        host = urlparse(base_url).netloc or base_url
+                        _LOGGER.warning(
+                            "Tallinn Vesi request to %s failed: authentication status %s",
+                            host,
+                            response.status,
+                        )
                         auth_error = TallinnVesiAuthError("Authentication failed")
                         continue
                     if response.status >= 400:
-                        raise TallinnVesiApiError(
-                            f"API request failed with status {response.status}"
+                        message = f"API request failed with status {response.status}"
+                        detail = await _response_error_detail(response)
+                        if detail:
+                            message = f"{message}: {detail}"
+                        host = urlparse(base_url).netloc or base_url
+                        _LOGGER.warning(
+                            "Tallinn Vesi request to %s failed: %s",
+                            host,
+                            message,
                         )
+                        raise TallinnVesiApiError(message)
                     payload = await response.json()
-            except ClientError as err:
+            except (ClientError, asyncio.TimeoutError) as err:
+                host = urlparse(base_url).netloc or base_url
+                error_detail = _redact_error_detail(str(err))
                 client_error = TallinnVesiApiError(
-                    "Error communicating with Tallinna Vesi API"
+                    "Error communicating with Tallinna Vesi API at "
+                    f"{host}: {err.__class__.__name__}: {error_detail}"
+                )
+                _LOGGER.warning(
+                    "Tallinn Vesi request to %s failed: %s: %s",
+                    host,
+                    err.__class__.__name__,
+                    error_detail,
                 )
                 if base_url == base_urls[-1]:
                     raise client_error from err
@@ -294,6 +339,34 @@ def _multi_get(mapping: Mapping[str, Any], *keys: str) -> Any:
         if key in mapping:
             return mapping[key]
     return None
+
+
+async def _response_error_detail(response: Any) -> str | None:
+    """Extract a short non-secret error detail from an API response."""
+
+    try:
+        payload = await response.json(content_type=None)
+    except (ClientError, ValueError, TypeError):
+        try:
+            text = await response.text()
+        except (ClientError, UnicodeDecodeError):
+            return None
+        return _redact_error_detail(text)[:300] if text else None
+
+    if isinstance(payload, Mapping):
+        detail = _multi_get(payload, "message", "error", "status")
+        if detail:
+            return _redact_error_detail(str(detail))[:300]
+    return None
+
+
+def _redact_error_detail(detail: str) -> str:
+    """Redact credential-like values from upstream error details."""
+
+    redacted = detail
+    for pattern, replacement in SENSITIVE_ERROR_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
 
 
 def _page_crosses_from_datetime(
