@@ -246,10 +246,17 @@ async def test_async_get_overview_readings_parses_smart_meter_entries() -> None:
 
 
 class _MockResponse:
-    def __init__(self, status: int, payload: object, text: str = "") -> None:
+    def __init__(
+        self,
+        status: int,
+        payload: object,
+        text: str = "",
+        content_type: str = "application/json",
+    ) -> None:
         self.status = status
         self._payload = payload
         self._text = text
+        self.content_type = content_type
 
     async def __aenter__(self) -> "_MockResponse":
         return self
@@ -318,6 +325,67 @@ async def test_request_raises_auth_error_when_all_base_urls_fail(
     assert "astv2.my.site.com" in caplog.text
     assert "klient.tallinnavesi.ee" in caplog.text
     assert "authentication status 401" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_prefers_auth_error_when_legacy_returns_login_html(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        if url.startswith(API_BASE_URL):
+            return _MockResponse(401, {"status": "error"})
+        return _MockResponse(
+            200,
+            {},
+            text="<html>login</html>",
+            content_type="text/html",
+        )
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(TallinnVesiAuthError, match="Authentication failed"):
+        await TallinnVesiApiClient._request(
+            client, "get", "/api/SmartMeter/GetSmartMeterReadings"
+        )
+    assert "authentication status 401" in caplog.text
+    assert "unexpected content type text/html" in caplog.text
+    assert "login?" not in caplog.text
+    assert "client_id" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_reports_legacy_timeout_after_new_api_auth_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._base_url = API_BASE_URL  # type: ignore[attr-defined]
+
+    def request(method: str, url: str, **kwargs: object) -> _MockResponse:
+        if url.startswith(API_BASE_URL):
+            return _MockResponse(401, {"status": "error"})
+        raise asyncio.TimeoutError
+
+    client._session = _MockSession(request)  # type: ignore[attr-defined]
+
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(
+        TallinnVesiApiError,
+        match=(
+            "Error communicating with Tallinna Vesi API at "
+            "klient.tallinnavesi.ee: TimeoutError"
+        ),
+    ):
+        await TallinnVesiApiClient._request(client, "get", "/api/Readings")
+    assert "authentication status 401" in caplog.text
+    assert "TimeoutError" in caplog.text
 
 
 @pytest.mark.asyncio

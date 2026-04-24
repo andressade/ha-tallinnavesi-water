@@ -283,10 +283,27 @@ class TallinnVesiApiClient:
                             message,
                         )
                         raise TallinnVesiApiError(message)
+                    if response.content_type != "application/json":
+                        host = urlparse(base_url).netloc or base_url
+                        message = (
+                            "API returned unexpected content type "
+                            f"{response.content_type or 'unknown'}"
+                        )
+                        _LOGGER.warning(
+                            "Tallinn Vesi request to %s failed: %s",
+                            host,
+                            message,
+                        )
+                        client_error = TallinnVesiApiError(message)
+                        if auth_error is not None:
+                            continue
+                        if base_url == base_urls[-1]:
+                            raise client_error
+                        continue
                     payload = await response.json()
             except (ClientError, asyncio.TimeoutError) as err:
                 host = urlparse(base_url).netloc or base_url
-                error_detail = _redact_error_detail(str(err))
+                error_detail = _redact_error_detail(str(err))[:300]
                 client_error = TallinnVesiApiError(
                     "Error communicating with Tallinna Vesi API at "
                     f"{host}: {err.__class__.__name__}: {error_detail}"
