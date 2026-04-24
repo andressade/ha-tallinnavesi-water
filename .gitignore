@@ -2,3 +2,6 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .omx/
+.DS_Store
+tasks/lessons.md
+tasks/todo.md
