@@ -15,7 +15,6 @@ CONF_ADDRESS = "address"
 CONF_API_KEY = "api_key"
 
 API_BASE_URL = "https://astv2.my.site.com/services/apexrest"
-LEGACY_API_BASE_URL = "https://klient.tallinnavesi.ee"
 READINGS_OVERVIEW_ENDPOINT = "/api/Readings"
 SMART_METER_READINGS_ENDPOINT = "/api/SmartMeter/GetSmartMeterReadings"
 SMART_METER_SUPPLY_POINTS_ENDPOINT = "/api/SmartMeter/GetSupplyPointsWithSmartMeter"

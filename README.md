@@ -6,7 +6,6 @@ Custom Home Assistant integration for monitoring cumulative and daily water cons
 
 - Secure authentication with Tallinna Vesi `X-API-Key`
 - Compatible with the ASTV Apex REST API migration (`astv2.my.site.com/services/apexrest`)
-- Automatically falls back to the legacy API if Tallinna Vesi has not activated your migrated ASTV key yet
 - Automatic discovery of the account's smart meter supply point
 - Validates that your account exposes at least one smart meter before completing setup
 - 10-minute polling of smart meter readings
@@ -41,7 +40,6 @@ After the first successful refresh, add the `Water consumption` sensor to the Ho
 
 - **Invalid API key**: verify the key from the Tallinna Vesi self-service portal. Existing keys continue to work after the API migration.
 - **Connection or access errors after the migration**: confirm Tallinna Vesi has whitelisted the outbound IP address used by your Home Assistant instance for the new ASTV API.
-- **New ASTV API rejects the key but the old API still works**: the integration falls back automatically to the legacy endpoint and keeps polling until Tallinna Vesi completes the migration on their side.
 - **API key changed or expired**: open the integration's repair / reauthentication prompt in Home Assistant and enter the replacement key. The integration updates the existing config entry and keeps the same smart meter if the new key can access it.
 - **No smart meters found**: ensure your account shows a smart meter at the Tallinna Vesi self-service page.
 - Check diagnostics (Device → Diagnostics) to view recent API responses and timestamps.

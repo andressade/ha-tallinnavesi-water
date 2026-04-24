@@ -17,7 +17,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     API_BASE_URL,
-    LEGACY_API_BASE_URL,
     READINGS_OVERVIEW_ENDPOINT,
     SMART_METER_READINGS_ENDPOINT,
     SMART_METER_READINGS_PAGE_SIZE,
@@ -103,7 +102,6 @@ class TallinnVesiApiClient:
     def __init__(self, session: ClientSession, api_key: str) -> None:
         self._session = session
         self._api_key = api_key
-        self._base_url = API_BASE_URL
 
     @classmethod
     def for_hass(cls, hass: HomeAssistant, api_key: str) -> "TallinnVesiApiClient":
@@ -244,92 +242,61 @@ class TallinnVesiApiClient:
     ) -> Any:
         """Execute an HTTP request to the Tallinna Vesi API."""
 
-        base_urls = [self._base_url]
-        if self._base_url == API_BASE_URL:
-            base_urls.append(LEGACY_API_BASE_URL)
+        url = f"{API_BASE_URL}{endpoint}"
+        host = urlparse(API_BASE_URL).netloc or API_BASE_URL
+        headers = {"X-API-Key": self._api_key, "Accept": "application/json"}
 
-        auth_error: TallinnVesiAuthError | None = None
-        client_error: TallinnVesiApiError | None = None
-        for base_url in base_urls:
-            url = f"{base_url}{endpoint}"
-            headers = {"X-API-Key": self._api_key}
-
-            try:
-                async with self._session.request(
-                    method,
-                    url,
-                    headers=headers,
-                    params=params,
-                    timeout=DEFAULT_TIMEOUT,
-                ) as response:
-                    if response.status in (401, 403):
-                        host = urlparse(base_url).netloc or base_url
-                        _LOGGER.warning(
-                            "Tallinn Vesi request to %s failed: authentication status %s",
-                            host,
-                            response.status,
-                        )
-                        auth_error = TallinnVesiAuthError("Authentication failed")
-                        continue
-                    if response.status >= 400:
-                        message = f"API request failed with status {response.status}"
-                        detail = await _response_error_detail(response)
-                        if detail:
-                            message = f"{message}: {detail}"
-                        host = urlparse(base_url).netloc or base_url
-                        _LOGGER.warning(
-                            "Tallinn Vesi request to %s failed: %s",
-                            host,
-                            message,
-                        )
-                        raise TallinnVesiApiError(message)
-                    if response.content_type != "application/json":
-                        host = urlparse(base_url).netloc or base_url
-                        message = (
-                            "API returned unexpected content type "
-                            f"{response.content_type or 'unknown'}"
-                        )
-                        _LOGGER.warning(
-                            "Tallinn Vesi request to %s failed: %s",
-                            host,
-                            message,
-                        )
-                        client_error = TallinnVesiApiError(message)
-                        if auth_error is not None:
-                            continue
-                        if base_url == base_urls[-1]:
-                            raise client_error
-                        continue
-                    payload = await response.json()
-            except (ClientError, asyncio.TimeoutError) as err:
-                host = urlparse(base_url).netloc or base_url
-                error_detail = _redact_error_detail(str(err))[:300]
-                client_error = TallinnVesiApiError(
-                    "Error communicating with Tallinna Vesi API at "
-                    f"{host}: {err.__class__.__name__}: {error_detail}"
-                )
-                _LOGGER.warning(
-                    "Tallinn Vesi request to %s failed: %s: %s",
-                    host,
-                    err.__class__.__name__,
-                    error_detail,
-                )
-                if base_url == base_urls[-1]:
-                    raise client_error from err
-                continue
-
-            if base_url != self._base_url:
-                _LOGGER.warning(
-                    "Tallinn Vesi new API rejected the configured key; falling back to legacy endpoint"
-                )
-                self._base_url = base_url
-            return payload
-
-        if auth_error is not None:
-            raise auth_error
-        if client_error is not None:
-            raise client_error
-        raise TallinnVesiApiError("Error communicating with Tallinna Vesi API")
+        try:
+            async with self._session.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                timeout=DEFAULT_TIMEOUT,
+            ) as response:
+                if response.status in (401, 403):
+                    _LOGGER.warning(
+                        "Tallinn Vesi request to %s failed: authentication status %s",
+                        host,
+                        response.status,
+                    )
+                    raise TallinnVesiAuthError("Authentication failed")
+                if response.status >= 400:
+                    message = f"API request failed with status {response.status}"
+                    detail = await _response_error_detail(response)
+                    if detail:
+                        message = f"{message}: {detail}"
+                    _LOGGER.warning(
+                        "Tallinn Vesi request to %s failed: %s",
+                        host,
+                        message,
+                    )
+                    raise TallinnVesiApiError(message)
+                if response.content_type != "application/json":
+                    message = (
+                        "API returned unexpected content type "
+                        f"{response.content_type or 'unknown'}"
+                    )
+                    _LOGGER.warning(
+                        "Tallinn Vesi request to %s failed: %s",
+                        host,
+                        message,
+                    )
+                    raise TallinnVesiApiError(message)
+                return await response.json()
+        except (ClientError, asyncio.TimeoutError) as err:
+            error_detail = _redact_error_detail(str(err))[:300]
+            client_error = TallinnVesiApiError(
+                "Error communicating with Tallinna Vesi API at "
+                f"{host}: {err.__class__.__name__}: {error_detail}"
+            )
+            _LOGGER.warning(
+                "Tallinn Vesi request to %s failed: %s: %s",
+                host,
+                err.__class__.__name__,
+                error_detail,
+            )
+            raise client_error from err
 
     @staticmethod
     def _format_datetime(value: datetime) -> str:

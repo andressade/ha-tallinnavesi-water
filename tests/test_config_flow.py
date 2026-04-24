@@ -243,7 +243,7 @@ async def test_validate_reauth_api_key_accepts_existing_supply_point() -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_reauth_api_key_accepts_legacy_meter_only_entry() -> None:
+async def test_validate_reauth_api_key_accepts_stored_meter_only_entry() -> None:
     client = AsyncMock()
     client.async_get_supply_points.return_value = [
         SupplyPoint(
