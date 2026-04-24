@@ -22,6 +22,8 @@ from .const import (
 )
 
 DEFAULT_TIMEOUT: Final = ClientTimeout(total=30)
+MAX_SMART_METER_READING_PAGES: Final = 10
+SMART_METER_READINGS_ORDER_BY: Final = "ReadingDate DESC"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -131,38 +133,85 @@ class TallinnVesiApiClient:
     ) -> SmartMeterReadingsResult:
         """Fetch smart meter readings from optional start date."""
 
-        params: dict[str, Any] = {
-            "meterNr": meter_number,
-            "to": self._format_datetime(dt_util.utcnow()),
-            "pageNo": 1,
-            "pageSize": SMART_METER_READINGS_PAGE_SIZE,
-        }
-        if from_datetime is not None:
-            params["from"] = self._format_datetime(from_datetime)
-
-        payload = await self._request("get", SMART_METER_READINGS_ENDPOINT, params=params)
-        readings_payload = _multi_get(payload, "Readings", "readings") or []
         readings: list[SmartMeterReading] = []
-        for item in readings_payload:
-            reading_date_raw = _multi_get(item, "ReadingDate", "readingDate")
-            reading_date = dt_util.parse_datetime(reading_date_raw)
-            if reading_date is None:
-                continue
-            readings.append(
-                SmartMeterReading(
-                    reading=_coerce_float(_multi_get(item, "Reading", "reading")),
-                    reading_end=_coerce_float(
-                        _multi_get(item, "ReadingEnd", "readingEnd")
-                    ),
-                    reading_date=dt_util.as_utc(reading_date),
-                )
+        from_datetime_utc = (
+            dt_util.as_utc(from_datetime) if from_datetime is not None else None
+        )
+        meter_number_result: Optional[str] = None
+        supply_point_id: Optional[str] = None
+        errors: list[str] = []
+        seen_pages: set[tuple[Any, ...]] = set()
+
+        for page_no in range(1, MAX_SMART_METER_READING_PAGES + 1):
+            params: dict[str, Any] = {
+                "meterNr": meter_number,
+                "pageNo": page_no,
+                "pageSize": SMART_METER_READINGS_PAGE_SIZE,
+                "orderBy": SMART_METER_READINGS_ORDER_BY,
+            }
+
+            payload = await self._request(
+                "get", SMART_METER_READINGS_ENDPOINT, params=params
             )
+            meter_number_result = meter_number_result or _multi_get(
+                payload, "MeterNr", "meterNr"
+            )
+            supply_point_id = supply_point_id or _multi_get(
+                payload, "SupplyPointId", "supplyPointId"
+            )
+            errors.extend(_multi_get(payload, "Errors", "errors") or [])
+
+            readings_payload = _multi_get(payload, "Readings", "readings") or []
+            if not readings_payload:
+                break
+
+            page_signature = tuple(
+                (
+                    _multi_get(item, "ReadingDate", "readingDate"),
+                    _multi_get(item, "Reading", "reading"),
+                    _multi_get(item, "ReadingEnd", "readingEnd"),
+                )
+                for item in readings_payload
+            )
+            if page_signature in seen_pages:
+                break
+            seen_pages.add(page_signature)
+
+            page_readings: list[SmartMeterReading] = []
+            for item in readings_payload:
+                reading_date_raw = _multi_get(item, "ReadingDate", "readingDate")
+                reading_date = dt_util.parse_datetime(reading_date_raw)
+                if reading_date is None:
+                    continue
+                reading_date_utc = dt_util.as_utc(reading_date)
+                page_readings.append(
+                    SmartMeterReading(
+                        reading=_coerce_float(_multi_get(item, "Reading", "reading")),
+                        reading_end=_coerce_float(
+                            _multi_get(item, "ReadingEnd", "readingEnd")
+                        ),
+                        reading_date=reading_date_utc,
+                    )
+                )
+
+            readings.extend(
+                reading
+                for reading in page_readings
+                if from_datetime_utc is None or reading.reading_date >= from_datetime_utc
+            )
+
+            if from_datetime_utc is None:
+                break
+            if len(readings_payload) < SMART_METER_READINGS_PAGE_SIZE:
+                break
+            if _page_crosses_from_datetime(page_readings, from_datetime_utc):
+                break
 
         return SmartMeterReadingsResult(
             readings=readings,
-            meter_number=_multi_get(payload, "MeterNr", "meterNr"),
-            supply_point_id=_multi_get(payload, "SupplyPointId", "supplyPointId"),
-            errors=list(_multi_get(payload, "Errors", "errors") or []),
+            meter_number=meter_number_result,
+            supply_point_id=supply_point_id,
+            errors=errors,
         )
 
     async def _request(
@@ -245,6 +294,19 @@ def _multi_get(mapping: Mapping[str, Any], *keys: str) -> Any:
         if key in mapping:
             return mapping[key]
     return None
+
+
+def _page_crosses_from_datetime(
+    readings: list[SmartMeterReading], from_datetime: datetime
+) -> bool:
+    """Return true when a descending page has reached older readings."""
+
+    if len(readings) < 2:
+        return False
+
+    first = readings[0].reading_date
+    last = readings[-1].reading_date
+    return first >= last and last < from_datetime
 
 
 def _parse_overview_date(value: Any) -> Optional[datetime]:

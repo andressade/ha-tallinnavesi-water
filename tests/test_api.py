@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 from aiohttp import ClientError
@@ -86,34 +86,124 @@ async def test_async_get_readings_accepts_lowercase_keys() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_get_readings_uses_salesforce_query_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_async_get_readings_uses_salesforce_query_defaults() -> None:
     client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
     client._session = None  # type: ignore[attr-defined]
     client._api_key = "secret"  # type: ignore[attr-defined]
-    client._request = AsyncMock(return_value={"readings": []})  # type: ignore[attr-defined]
-
-    from_dt = datetime(2026, 1, 15, 6, 45, tzinfo=timezone.utc)
-    now = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(
-        "custom_components.tallinnavesi_water.api.dt_util.utcnow",
-        lambda: now,
+    client._request = AsyncMock(  # type: ignore[attr-defined]
+        return_value={
+            "readings": [
+                {
+                    "reading": 10.0,
+                    "readingDate": "2026-01-14T23:59:59Z",
+                },
+                {
+                    "reading": 11.0,
+                    "readingDate": "2026-01-15T06:45:00Z",
+                },
+            ]
+        }
     )
 
-    await TallinnVesiApiClient.async_get_readings(client, "999999", from_dt)
+    from_dt = datetime(2026, 1, 15, 6, 45, tzinfo=timezone.utc)
+
+    result = await TallinnVesiApiClient.async_get_readings(client, "999999", from_dt)
 
     client._request.assert_awaited_once_with(
         "get",
         SMART_METER_READINGS_ENDPOINT,
         params={
             "meterNr": "999999",
-            "from": "2026-01-15T06:45:00Z",
-            "to": "2026-04-01T00:00:00Z",
             "pageNo": 1,
             "pageSize": SMART_METER_READINGS_PAGE_SIZE,
+            "orderBy": "ReadingDate DESC",
         },
     )
+    assert [reading.reading for reading in result.readings] == [11.0]
+
+
+@pytest.mark.asyncio
+async def test_async_get_readings_paginates_until_from_datetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.tallinnavesi_water.api.SMART_METER_READINGS_PAGE_SIZE",
+        2,
+    )
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._session = None  # type: ignore[attr-defined]
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    client._request = AsyncMock(  # type: ignore[attr-defined]
+        side_effect=[
+            {
+                "meterNr": "999999",
+                "readings": [
+                    {"reading": 13.0, "readingDate": "2026-01-17T00:00:00Z"},
+                    {"reading": 12.0, "readingDate": "2026-01-16T00:00:00Z"},
+                ],
+            },
+            {
+                "meterNr": "999999",
+                "readings": [
+                    {"reading": 11.0, "readingDate": "2026-01-15T00:00:00Z"},
+                    {"reading": 10.0, "readingDate": "2026-01-14T00:00:00Z"},
+                ],
+            },
+        ]
+    )
+
+    from_dt = datetime(2026, 1, 15, tzinfo=timezone.utc)
+
+    result = await TallinnVesiApiClient.async_get_readings(client, "999999", from_dt)
+
+    assert client._request.await_args_list == [
+        call(
+            "get",
+            SMART_METER_READINGS_ENDPOINT,
+            params={
+                "meterNr": "999999",
+                "pageNo": 1,
+                "pageSize": 2,
+                "orderBy": "ReadingDate DESC",
+            },
+        ),
+        call(
+            "get",
+            SMART_METER_READINGS_ENDPOINT,
+            params={
+                "meterNr": "999999",
+                "pageNo": 2,
+                "pageSize": 2,
+                "orderBy": "ReadingDate DESC",
+            },
+        ),
+    ]
+    assert [reading.reading for reading in result.readings] == [13.0, 12.0, 11.0]
+
+
+@pytest.mark.asyncio
+async def test_async_get_readings_stops_on_duplicate_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.tallinnavesi_water.api.SMART_METER_READINGS_PAGE_SIZE",
+        1,
+    )
+    client = TallinnVesiApiClient.__new__(TallinnVesiApiClient)
+    client._session = None  # type: ignore[attr-defined]
+    client._api_key = "secret"  # type: ignore[attr-defined]
+    page = {
+        "meterNr": "999999",
+        "readings": [{"reading": 13.0, "readingDate": "2026-01-17T00:00:00Z"}],
+    }
+    client._request = AsyncMock(side_effect=[page, page])  # type: ignore[attr-defined]
+
+    from_dt = datetime(2026, 1, 15, tzinfo=timezone.utc)
+
+    result = await TallinnVesiApiClient.async_get_readings(client, "999999", from_dt)
+
+    assert client._request.await_count == 2
+    assert [reading.reading for reading in result.readings] == [13.0]
 
 
 @pytest.mark.asyncio
