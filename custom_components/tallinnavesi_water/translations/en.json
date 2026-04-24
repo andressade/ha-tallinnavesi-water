@@ -14,6 +14,13 @@
         "data": {
           "meter_number": "Smart meter"
         }
+      },
+      "reauth_confirm": {
+        "title": "Update Tallinna Vesi API key",
+        "description": "Enter a new Tallinna Vesi API key for this smart meter.",
+        "data": {
+          "api_key": "API key"
+        }
       }
     },
     "error": {

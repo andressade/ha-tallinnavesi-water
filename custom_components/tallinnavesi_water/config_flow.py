@@ -35,6 +35,7 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     _api_key: str | None = None
+    _reauth_entry: config_entries.ConfigEntry | None = None
     _supply_points: list[dict[str, Any]] | None = None
 
     async def async_step_user(
@@ -89,6 +90,70 @@ class TallinnVesiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self._async_create_entry(self._supply_points[0])
 
         return await self.async_step_select_meter()
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Handle reauthentication when the stored API key stops working."""
+
+        entry_id = self.context.get("entry_id")
+        if entry_id is not None:
+            self._reauth_entry = self.hass.config_entries.async_get_entry(entry_id)
+
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: Mapping[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask for and validate a replacement API key."""
+
+        errors: dict[str, str] = {}
+        schema = vol.Schema({vol.Required(CONF_API_KEY): str})
+
+        if user_input is None:
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                data_schema=schema,
+            )
+
+        api_key = user_input[CONF_API_KEY].strip()
+        if self._reauth_entry is None:
+            return self.async_abort(reason="reauth_failed")
+
+        client = TallinnVesiApiClient.for_hass(self.hass, api_key)
+        expected_unique_id = _entry_unique_id(self._reauth_entry.data)
+        errors = await _validate_reauth_api_key(
+            client,
+            supply_point_id=self._reauth_entry.data.get(CONF_SUPPLY_POINT_ID),
+            meter_number=self._reauth_entry.data.get(CONF_METER_NUMBER),
+        )
+
+        if errors or not expected_unique_id:
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                data_schema=schema,
+                errors=errors or {"base": "no_supply_points"},
+            )
+
+        matching_entry = await self.async_set_unique_id(
+            expected_unique_id,
+            raise_on_progress=False,
+        )
+        if (
+            matching_entry is not None
+            and matching_entry.entry_id != self._reauth_entry.entry_id
+        ):
+            return self.async_abort(reason="already_configured")
+
+        if (
+            self._reauth_entry.unique_id is not None
+            and self._reauth_entry.unique_id != expected_unique_id
+        ):
+            return self.async_abort(reason="reauth_failed")
+
+        return self.async_update_reload_and_abort(
+            self._reauth_entry,
+            unique_id=expected_unique_id,
+            data={**self._reauth_entry.data, CONF_API_KEY: api_key},
+        )
 
     async def async_step_select_meter(
         self, user_input: Mapping[str, Any] | None = None
@@ -187,3 +252,56 @@ def _build_supply_point_selections(
         selections.append(selection)
 
     return selections
+
+
+def _entry_unique_id(entry_data: Mapping[str, Any]) -> str | None:
+    """Return the unique ID used by stored entries."""
+
+    return entry_data.get(CONF_SUPPLY_POINT_ID) or entry_data.get(CONF_METER_NUMBER)
+
+
+def _has_supply_point_identity(
+    supply_points: list[SupplyPoint],
+    *,
+    supply_point_id: str | None,
+    meter_number: str | None,
+) -> bool:
+    """Return true when the replacement key can still access the configured entry."""
+
+    if supply_point_id is not None:
+        return any(
+            supply_point.supply_point_id == supply_point_id
+            for supply_point in supply_points
+        )
+    if meter_number is not None:
+        return any(
+            supply_point.meter_number == meter_number for supply_point in supply_points
+        )
+    if supply_point_id is None and meter_number is None:
+        return bool(supply_points)
+    return False
+
+
+async def _validate_reauth_api_key(
+    client: TallinnVesiApiClient,
+    *,
+    supply_point_id: str | None,
+    meter_number: str | None,
+) -> dict[str, str]:
+    """Validate that a replacement key can access the configured entry."""
+
+    try:
+        supply_points = await client.async_get_supply_points()
+    except TallinnVesiAuthError:
+        return {"base": "invalid_auth"}
+    except TallinnVesiApiError:
+        return {"base": "cannot_connect"}
+
+    if not _has_supply_point_identity(
+        supply_points,
+        supply_point_id=supply_point_id,
+        meter_number=meter_number,
+    ):
+        return {"base": "no_supply_points"}
+
+    return {}
